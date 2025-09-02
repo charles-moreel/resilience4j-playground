@@ -30,7 +30,7 @@ public class ExternalWsService {
         try {
             return CompletableFuture.supplyAsync(
                             this::callExternalWs,
-                            CompletableFuture.delayedExecutor(1000, TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
+                            CompletableFuture.delayedExecutor(100, TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
                     )
                     .exceptionally((ex) -> {
                         LOG.error(ex);
