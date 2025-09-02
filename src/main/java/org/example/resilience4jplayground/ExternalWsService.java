@@ -4,22 +4,47 @@
  */
 package org.example.resilience4jplayground;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Component;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class ExternalWsService {
 
-    Thread.Builder virtualThreadBuilder;
+    private static final Logger LOG = LogManager.getLogger(ExternalWsService.class);
+
+    private final ThreadFactory virtualThreadFactory;
 
     public ExternalWsService() {
-        virtualThreadBuilder = Thread.ofVirtual().name("externalWS");
+        virtualThreadFactory = Thread.ofVirtual().name("externalWS").factory();
     }
 
     public String call() {
-//        Executors.newVirtualThreadPerTaskExecutor()
 
+        try {
+            return CompletableFuture.supplyAsync(
+                            this::callExternalWs,
+                            CompletableFuture.delayedExecutor(1000, TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
+                    )
+                    .exceptionally((ex) -> {
+                        LOG.error(ex);
+                        return "Call failed: " + ex.getMessage();
+                    })
+                    .get();
+        } catch (ExecutionException | InterruptedException ex) {
+            LOG.error(ex);
+            return "Call failed: " + ex.getMessage();
+        }
+    }
 
-//        CompletableFuture<String> future = CompletableFuture.supplyAsync()
+    private String callExternalWs() {
+        LOG.info("callExternalWs");
         return "Call succeeded";
     }
 }
