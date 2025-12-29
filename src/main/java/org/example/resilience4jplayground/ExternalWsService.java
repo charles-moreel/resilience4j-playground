@@ -14,6 +14,10 @@ import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.timelimiter.TimeLimiter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.State;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -23,11 +27,14 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 @Component
+@State(Scope.Benchmark)
+@Fork(value = 1, warmups = 0)
 public class ExternalWsService {
 
     private static final Logger LOG = LogManager.getLogger(ExternalWsService.class);
@@ -38,6 +45,7 @@ public class ExternalWsService {
         virtualThreadFactory = Thread.ofVirtual().name("externalWS").factory();
     }
 
+    @Benchmark
     public String call() {
 
         try {
@@ -51,6 +59,7 @@ public class ExternalWsService {
             return "Call failed: " + ex.getMessage();
         }
     }
+
 
     public void resilience4J() {
         // Create a CircuitBreaker with default configuration
@@ -105,7 +114,7 @@ public class ExternalWsService {
     private CompletableFuture<String> callExternalWsFuture() {
         return CompletableFuture.supplyAsync(
                         this::callExternalWs,
-                        CompletableFuture.delayedExecutor(100, TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
+                        CompletableFuture.delayedExecutor(ThreadLocalRandom.current().nextLong(20, 120), TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
                 )
                 .exceptionally(ex -> {
                     LOG.error(ex);
