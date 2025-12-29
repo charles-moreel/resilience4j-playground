@@ -1,7 +1,3 @@
-/*
- * Customization TAO
- * Copyright (C) 2022-2025
- */
 package org.example.resilience4jplayground;
 
 import io.github.resilience4j.bulkhead.Bulkhead;
@@ -15,9 +11,14 @@ import io.github.resilience4j.timelimiter.TimeLimiter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -34,7 +35,6 @@ import java.util.function.Supplier;
 
 @Component
 @State(Scope.Benchmark)
-@Fork(value = 1, warmups = 0)
 public class ExternalWsService {
 
     private static final Logger LOG = LogManager.getLogger(ExternalWsService.class);
@@ -45,15 +45,63 @@ public class ExternalWsService {
         virtualThreadFactory = Thread.ofVirtual().name("externalWS").factory();
     }
 
-    @Benchmark
     public String call() {
+        return simpleCallExternalWsFuture();
+//        return resilience4jCallExternalWsFuture();
+    }
+
+    @Benchmark
+    @Threads(value = 2)
+    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+    @BenchmarkMode(Mode.AverageTime)
+    @Warmup(iterations = 0)
+    @Fork(value = 1)
+    public String simpleCallExternalWsFuture() {
 
         try {
-            return callExternalWsFuture().get();
-        } catch (ExecutionException ex) {
+            return CompletableFuture.supplyAsync(this::callExternalWs)
+                    .exceptionally(ex -> {
+                        LOG.error(ex);
+                        return "Call failed: " + ex.getMessage();
+                    })
+                    .thenApply(response -> {
+                        LOG.info("callExternalWs response: {}", () -> response);
+                        return response;
+                    })
+                    .get();
+        } catch (final ExecutionException ex) {
             LOG.error(ex);
             return "Call failed: " + ex.getMessage();
-        } catch (InterruptedException ex) {
+        } catch (final InterruptedException ex) {
+            LOG.error(ex);
+            Thread.currentThread().interrupt();
+            return "Call failed: " + ex.getMessage();
+        }
+    }
+
+    //    @Benchmark
+//    @Threads(value = 2)
+//    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+//    @BenchmarkMode(Mode.AverageTime)
+//    @Warmup(iterations = 0)
+//    @Fork(value = 1)
+    public String resilience4jCallExternalWsFuture() {
+
+        try {
+            return CompletableFuture.supplyAsync(this::callExternalWs)
+                    .exceptionally(ex -> {
+                        LOG.error(ex);
+                        return "Call failed: " + ex.getMessage();
+                    })
+                    .thenApply(response -> {
+                        LOG.info("callExternalWs response: {}", () -> response);
+                        return response;
+                    })
+                    .get();
+        } catch (final ExecutionException ex) {
+            LOG.error(ex);
+            return "Call failed: " + ex.getMessage();
+        } catch (final InterruptedException ex) {
             LOG.error(ex);
             Thread.currentThread().interrupt();
             return "Call failed: " + ex.getMessage();
@@ -63,24 +111,24 @@ public class ExternalWsService {
 
     public void resilience4J() {
         // Create a CircuitBreaker with default configuration
-        CircuitBreaker circuitBreaker = CircuitBreaker
+        final CircuitBreaker circuitBreaker = CircuitBreaker
                 .ofDefaults("externalWsCircuitBreaker");
 
 // Create a Retry with default configuration
 // 3 retry attempts and a fixed time interval between retries of 500ms
-        Retry retry = Retry
+        final Retry retry = Retry
                 .ofDefaults("externalWsRetry");
 
 // Create a Bulkhead with default configuration
-        Bulkhead bulkhead = Bulkhead
+        final Bulkhead bulkhead = Bulkhead
                 .ofDefaults("externalWsBulkhead");
 
-        Supplier<String> supplier = this::call;
+        final Supplier<String> supplier = this::call;
 
 // Decorate your call to backendService.doSomething()
 // with a Bulkhead, CircuitBreaker and Retry
 // **note: you will need the resilience4j-all dependency for this
-        Supplier<String> decoratedSupplier = Decorators.ofSupplier(supplier)
+        final Supplier<String> decoratedSupplier = Decorators.ofSupplier(supplier)
                 .withCircuitBreaker(circuitBreaker)
                 .withBulkhead(bulkhead)
                 .withRetry(retry)
@@ -88,19 +136,19 @@ public class ExternalWsService {
 
 // When you don't want to decorate your lambda expression,
 // but just execute it and protect the call by a CircuitBreaker.
-        String result = circuitBreaker
+        final String result = circuitBreaker
                 .executeSupplier(this::call);
 
 // You can also run the supplier asynchronously in a ThreadPoolBulkhead
-        ThreadPoolBulkhead threadPoolBulkhead = ThreadPoolBulkhead
+        final ThreadPoolBulkhead threadPoolBulkhead = ThreadPoolBulkhead
                 .ofDefaults("externaleWsThreadPoolBulkhead");
 
 // The Scheduler is needed to schedule a timeout
 // on a non-blocking CompletableFuture
-        ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(3);
-        TimeLimiter timeLimiter = TimeLimiter.of(Duration.ofSeconds(1));
+        final ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(3);
+        final TimeLimiter timeLimiter = TimeLimiter.of(Duration.ofSeconds(1));
 
-        CompletableFuture<String> future = Decorators.ofSupplier(supplier)
+        final CompletableFuture<String> future = Decorators.ofSupplier(supplier)
                 .withThreadPoolBulkhead(threadPoolBulkhead)
                 .withTimeLimiter(timeLimiter, scheduledExecutorService)
                 .withCircuitBreaker(circuitBreaker)
@@ -108,25 +156,24 @@ public class ExternalWsService {
                                 CallNotPermittedException.class,
                                 BulkheadFullException.class),
                         throwable -> "throwable")
-                .get().toCompletableFuture();
-    }
-
-    private CompletableFuture<String> callExternalWsFuture() {
-        return CompletableFuture.supplyAsync(
-                        this::callExternalWs,
-                        CompletableFuture.delayedExecutor(ThreadLocalRandom.current().nextLong(20, 120), TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
-                )
-                .exceptionally(ex -> {
-                    LOG.error(ex);
-                    return "Call failed: " + ex.getMessage();
-                })
-                .thenApply(response -> {
-                    LOG.info("callExternalWs response: {}", () -> response);
-                    return response;
-                });
+                .get()
+                .toCompletableFuture();
     }
 
     private String callExternalWs() {
-        return "Call succeeded";
+        try {
+            return CompletableFuture.supplyAsync(
+                            () -> "Call succeeded",
+                            CompletableFuture.delayedExecutor(ThreadLocalRandom.current().nextLong(20, 120), TimeUnit.MILLISECONDS, Executors.newThreadPerTaskExecutor(virtualThreadFactory))
+                    )
+                    .get();
+        } catch (final ExecutionException ex) {
+            LOG.error(ex);
+            return "Call failed: " + ex.getMessage();
+        } catch (final InterruptedException ex) {
+            LOG.error(ex);
+            Thread.currentThread().interrupt();
+            return "Call failed: " + ex.getMessage();
+        }
     }
 }
